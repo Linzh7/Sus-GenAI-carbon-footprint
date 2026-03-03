@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lifecycle Carbon Footprint Estimator - Presentation</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --fg: #e2e8f0;
+      --accent: #38bdf8;
+      --muted: #94a3b8;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      overflow: hidden;
+    }
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    .slide {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 64px;
+      position: absolute;
+      inset: 0;
+      display: none;
+      background: radial-gradient(circle at 20% 20%, #1e293b 0%, #0f172a 65%);
+    }
+    .slide.active {
+      display: block;
+    }
+    h1, h2 {
+      margin-top: 0;
+      color: var(--accent);
+    }
+    ul {
+      line-height: 1.5;
+      font-size: 1.25rem;
+    }
+    p, code {
+      font-size: 1.15rem;
+      line-height: 1.5;
+    }
+    pre {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      padding: 14px;
+      border-radius: 10px;
+      color: #cbd5e1;
+      overflow: auto;
+    }
+    .footer {
+      position: absolute;
+      bottom: 16px;
+      right: 24px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <section class="slide active">
+      <h1>Lifecycle Carbon Footprint Estimator</h1>
+      <p>GenAI training + inference lifecycle estimator</p>
+      <p>Date: March 3, 2026</p>
+      <div class="footer">1 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Problem</h2>
+      <ul>
+        <li>Teams need fast carbon and cost estimates before full telemetry exists.</li>
+        <li>Training and inference behavior differ substantially.</li>
+        <li>Decision-makers need both simplicity and defensibility.</li>
+      </ul>
+      <div class="footer">2 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Core Model (Unchanged)</h2>
+      <pre><code>E = N * T * rho * TDP * PUE
+CO2e = E * CI</code></pre>
+      <ul>
+        <li>Kept as the default front-door estimator.</li>
+        <li>Optional knobs wrap the equation, not replace it.</li>
+      </ul>
+      <div class="footer">3 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Practical Improvements</h2>
+      <ul>
+        <li>Workload profiles for training and inference modes.</li>
+        <li>GPU-hours and request-based inference options.</li>
+        <li>Time-resolved carbon intensity support.</li>
+        <li>Uncertainty ranges plus Monte Carlo p10/p50/p90.</li>
+      </ul>
+      <div class="footer">4 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Carbon Intensity Sources</h2>
+      <ul>
+        <li>Electricity Maps: latest + historical window average.</li>
+        <li>UK National Grid API: latest + historical range.</li>
+        <li>Source and mode are selectable in CLI.</li>
+      </ul>
+      <div class="footer">5 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Request-Based Inference</h2>
+      <ul>
+        <li><code>kwh_per_1k_tokens</code> strategy</li>
+        <li>Linear token strategy: <code>E_req = a * L_in + b * L_out</code></li>
+        <li>Adjustments for quantization, batching, streaming, context, KV cache, dense vs MoE</li>
+      </ul>
+      <div class="footer">6 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>System-Level Knobs</h2>
+      <ul>
+        <li>NVLink/InfiniBand overhead</li>
+        <li>CPU and memory power allocation</li>
+        <li>Idle provisioning fraction</li>
+        <li>Power capping and thermal throttling factors</li>
+      </ul>
+      <div class="footer">7 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Calibration and Uncertainty</h2>
+      <ul>
+        <li>Utilization (<code>rho</code>) from defaults, profile, user override, or telemetry file.</li>
+        <li>Uncertainty ranges reported by default.</li>
+        <li>Optional Monte Carlo analysis for distribution outputs.</li>
+      </ul>
+      <div class="footer">8 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Code Structure</h2>
+      <pre><code>main.py
+cli.py
+models.py
+carbon_clients.py
+estimator.py
+data.json</code></pre>
+      <p>Presentation files live in <code>presentation/</code>.</p>
+      <div class="footer">9 / 10</div>
+    </section>
+
+    <section class="slide">
+      <h2>Next Steps</h2>
+      <ul>
+        <li>Add benchmark harness for per-token energy calibration.</li>
+        <li>Add non-interactive CLI flags for automation.</li>
+        <li>Add integration tests with fixture API responses.</li>
+      </ul>
+      <p>Use Left/Right arrows to navigate.</p>
+      <div class="footer">10 / 10</div>
+    </section>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    let idx = 0;
+    function show(i) {
+      idx = Math.max(0, Math.min(i, slides.length - 1));
+      slides.forEach((s, j) => s.classList.toggle("active", j === idx));
+    }
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") show(idx + 1);
+      if (e.key === "ArrowLeft" || e.key === "PageUp") show(idx - 1);
+    });
+  </script>
+</body>
+</html>
