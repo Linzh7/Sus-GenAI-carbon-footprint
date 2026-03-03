@@ -1,0 +1,1 @@
+# Sus-GenAI-carbon-footprint
