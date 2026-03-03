@@ -306,7 +306,7 @@ def gather_request_inference(inference_profile_cfg: Dict[str, Any]) -> RequestIn
 
 def gather_user_input(db: Dict[str, Any]) -> UserInput:
     gpu_model, num_gpus, gpu_hourly_override, provider, instance, instance_count = select_gpu_from_catalog(db)
-    country = normalize_country(prompt_non_empty("Country/location code (US, DE, GB, ...): "), db)
+    country = normalize_country(prompt_non_empty("Country/location code (FI, US, DE, GB, ...): "), db)
 
     ci_source = prompt_choice(
         "CI source [1=electricity_maps, 2=uk_national_grid]: ",
