@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "version": "0.2",
+    "last_updated": "2026-03-03",
+    "notes": "Merged dataset for GPU specs, pricing, country settings, and Electricity Maps zone mapping."
+  },
+  "defaults": {
+    "rho_training": 0.7,
+    "rho_inference": 0.5,
+    "pue_default": 1.2,
+    "electricity_price_usd_per_kwh": 0.15,
+    "carbon_price_usd_per_ton_co2e": 75.0
+  },
+  "architecture_efficiency_factor": {
+    "Turing": 1.0,
+    "Ampere": 0.9,
+    "Ada": 0.85,
+    "Hopper": 0.75,
+    "Blackwell": 0.65
+  },
+  "pue_by_country": {
+    "DE": 1.2,
+    "FI": 1.15,
+    "US": 1.25
+  },
+  "electricity_price_usd_per_kwh_by_country": {
+    "DE": 0.31,
+    "FI": 0.18,
+    "US": 0.16
+  },
+  "electricitymaps_zone_by_country": {
+    "DE": "DE",
+    "FI": "FI",
+    "US": "US-CAL-CISO"
+  },
+  "country_aliases": {
+    "germany": "DE",
+    "deutschland": "DE",
+    "finland": "FI",
+    "suomi": "FI",
+    "united states": "US",
+    "usa": "US",
+    "us": "US"
+  },
+  "gpu_specs": {
+    "NVIDIA T4": {
+      "architecture": "Turing",
+      "tdp_watts": 75,
+      "memory_gb": 16,
+      "typical_use": "inference",
+      "embodied_kgco2e": 300,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 0.35
+    },
+    "NVIDIA A10 Tensor Core": {
+      "architecture": "Ampere",
+      "tdp_watts": 300,
+      "memory_gb": 24,
+      "typical_use": "mixed",
+      "embodied_kgco2e": 700,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 0.8
+    },
+    "NVIDIA L40S": {
+      "architecture": "Ada",
+      "tdp_watts": 350,
+      "memory_gb": 48,
+      "typical_use": "inference",
+      "embodied_kgco2e": 900,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 1.6
+    },
+    "NVIDIA A100 PCIe 40GB": {
+      "architecture": "Ampere",
+      "tdp_watts": 250,
+      "memory_gb": 40,
+      "typical_use": "training",
+      "embodied_kgco2e": 1100,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 1.6
+    },
+    "NVIDIA A100 SXM4 80GB": {
+      "architecture": "Ampere",
+      "tdp_watts": 400,
+      "memory_gb": 80,
+      "typical_use": "training",
+      "embodied_kgco2e": 1200,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 2.45
+    },
+    "NVIDIA H100 PCIe 80GB": {
+      "architecture": "Hopper",
+      "tdp_watts": 350,
+      "memory_gb": 80,
+      "typical_use": "training",
+      "embodied_kgco2e": 1500,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 3.2
+    },
+    "NVIDIA H100 SXM5 80GB": {
+      "architecture": "Hopper",
+      "tdp_watts": 700,
+      "memory_gb": 80,
+      "typical_use": "training",
+      "embodied_kgco2e": 1700,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 4.5
+    },
+    "NVIDIA H200 SXM5 141GB": {
+      "architecture": "Hopper",
+      "tdp_watts": 800,
+      "memory_gb": 141,
+      "typical_use": "training",
+      "embodied_kgco2e": 1900,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 5.8
+    },
+    "NVIDIA B200 Blackwell": {
+      "architecture": "Blackwell",
+      "tdp_watts": 1200,
+      "memory_gb": 192,
+      "typical_use": "training",
+      "embodied_kgco2e": 2200,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 8.5
+    },
+    "NVIDIA B300 Blackwell Ultra": {
+      "architecture": "Blackwell",
+      "tdp_watts": 1400,
+      "memory_gb": 288,
+      "typical_use": "training",
+      "embodied_kgco2e": 2500,
+      "expected_lifetime_hours": 30000,
+      "hourly_price_usd": 10.0
+    }
+  }
+}
