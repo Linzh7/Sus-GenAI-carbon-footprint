@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "0.2",
+    "version": "0.3",
     "last_updated": "2026-03-03",
-    "notes": "Merged dataset for GPU specs, pricing, country settings, and Electricity Maps zone mapping."
+    "notes": "Unified dataset for GPU specs, CI mapping, cloud instances, and uncertainty assumptions."
   },
   "defaults": {
     "rho_training": 0.7,
@@ -10,6 +10,114 @@
     "pue_default": 1.2,
     "electricity_price_usd_per_kwh": 0.15,
     "carbon_price_usd_per_ton_co2e": 75.0
+  },
+  "uncertainty": {
+    "rho_pct": 0.15,
+    "pue_pct": 0.1,
+    "ci_pct": 0.1,
+    "electricity_price_pct": 0.2,
+    "embodied_pct": 0.4,
+    "request_energy_pct": 0.2
+  },
+  "power_model_defaults": {
+    "idle_fraction": 0.05,
+    "idle_power_fraction": 0.25,
+    "nvlink_watts_per_gpu": 18.0,
+    "cpu_watts_per_gpu": 45.0,
+    "memory_watts_per_gpu": 22.0,
+    "power_cap_factor": 1.0,
+    "thermal_throttle_factor": 1.0,
+    "network_overhead_pct": 0.05
+  },
+  "model_family_factors": {
+    "dense": 1.0,
+    "moe": 0.85
+  },
+  "training_profiles": {
+    "pretraining_dense": {
+      "rho": 0.82,
+      "idle_fraction": 0.03,
+      "network_overhead_pct": 0.1,
+      "cpu_watts_per_gpu": 55.0
+    },
+    "finetune_sft": {
+      "rho": 0.72,
+      "idle_fraction": 0.06,
+      "network_overhead_pct": 0.06
+    },
+    "rlhf_ppo": {
+      "rho": 0.63,
+      "idle_fraction": 0.1,
+      "network_overhead_pct": 0.14
+    },
+    "hyperparam_sweep": {
+      "rho": 0.55,
+      "idle_fraction": 0.2,
+      "network_overhead_pct": 0.05
+    }
+  },
+  "inference_profiles": {
+    "online_low_batch": {
+      "rho": 0.38,
+      "idle_fraction": 0.15,
+      "network_overhead_pct": 0.05,
+      "request_defaults": {
+        "kwh_per_1k_tokens": 0.08,
+        "gpu_cost_usd_per_1k_tokens": 0.18,
+        "quantization_factor": 0.85,
+        "batch_efficiency_factor": 1.0,
+        "streaming_overhead_factor": 1.1,
+        "model_family": "dense",
+        "coef_a_kwh_per_input_token": 0.0000025,
+        "coef_b_kwh_per_output_token": 0.000005
+      }
+    },
+    "offline_batch": {
+      "rho": 0.58,
+      "idle_fraction": 0.04,
+      "network_overhead_pct": 0.02,
+      "request_defaults": {
+        "kwh_per_1k_tokens": 0.045,
+        "gpu_cost_usd_per_1k_tokens": 0.09,
+        "quantization_factor": 0.8,
+        "batch_efficiency_factor": 0.8,
+        "streaming_overhead_factor": 1.0,
+        "model_family": "dense",
+        "coef_a_kwh_per_input_token": 0.0000016,
+        "coef_b_kwh_per_output_token": 0.0000032
+      }
+    },
+    "rag_serving": {
+      "rho": 0.45,
+      "idle_fraction": 0.1,
+      "network_overhead_pct": 0.08,
+      "cpu_watts_per_gpu": 60.0,
+      "request_defaults": {
+        "kwh_per_1k_tokens": 0.095,
+        "gpu_cost_usd_per_1k_tokens": 0.21,
+        "quantization_factor": 0.9,
+        "batch_efficiency_factor": 0.95,
+        "streaming_overhead_factor": 1.05,
+        "model_family": "dense",
+        "coef_a_kwh_per_input_token": 0.0000031,
+        "coef_b_kwh_per_output_token": 0.0000053
+      }
+    },
+    "cached_chat": {
+      "rho": 0.32,
+      "idle_fraction": 0.18,
+      "network_overhead_pct": 0.04,
+      "request_defaults": {
+        "kwh_per_1k_tokens": 0.032,
+        "gpu_cost_usd_per_1k_tokens": 0.07,
+        "quantization_factor": 0.75,
+        "batch_efficiency_factor": 0.9,
+        "streaming_overhead_factor": 1.02,
+        "model_family": "dense",
+        "coef_a_kwh_per_input_token": 0.0000012,
+        "coef_b_kwh_per_output_token": 0.0000028
+      }
+    }
   },
   "architecture_efficiency_factor": {
     "Turing": 1.0,
@@ -21,17 +129,23 @@
   "pue_by_country": {
     "DE": 1.2,
     "FI": 1.15,
-    "US": 1.25
+    "US": 1.25,
+    "GB": 1.22,
+    "UK": 1.22
   },
   "electricity_price_usd_per_kwh_by_country": {
     "DE": 0.31,
     "FI": 0.18,
-    "US": 0.16
+    "US": 0.16,
+    "GB": 0.26,
+    "UK": 0.26
   },
   "electricitymaps_zone_by_country": {
     "DE": "DE",
     "FI": "FI",
-    "US": "US-CAL-CISO"
+    "US": "US-CAL-CISO",
+    "GB": "GB",
+    "UK": "GB"
   },
   "country_aliases": {
     "germany": "DE",
@@ -40,7 +154,50 @@
     "suomi": "FI",
     "united states": "US",
     "usa": "US",
-    "us": "US"
+    "us": "US",
+    "united kingdom": "GB",
+    "great britain": "GB",
+    "britain": "GB",
+    "uk": "GB",
+    "england": "GB"
+  },
+  "cloud_instance_mapping": {
+    "aws": {
+      "p4d.24xlarge": {
+        "gpu_model": "NVIDIA A100 SXM4 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 32.77
+      },
+      "p5.48xlarge": {
+        "gpu_model": "NVIDIA H100 SXM5 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 98.32
+      }
+    },
+    "gcp": {
+      "a2-highgpu-8g": {
+        "gpu_model": "NVIDIA A100 SXM4 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 29.0
+      },
+      "a3-highgpu-8g": {
+        "gpu_model": "NVIDIA H100 SXM5 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 88.0
+      }
+    },
+    "azure": {
+      "standard_nd96isr_h100_v5": {
+        "gpu_model": "NVIDIA H100 SXM5 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 95.0
+      },
+      "standard_nd96amsr_a100_v4": {
+        "gpu_model": "NVIDIA A100 SXM4 80GB",
+        "gpus_per_instance": 8,
+        "hourly_price_usd": 34.0
+      }
+    }
   },
   "gpu_specs": {
     "NVIDIA T4": {

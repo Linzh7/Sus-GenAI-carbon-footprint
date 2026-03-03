@@ -19,7 +19,7 @@ where:
 
 - (N) = number of GPUs
 - (T) = runtime (hours)
-- (\rho) = utilization factor
+- ($\rho$) = utilization factor
 - TDP = thermal design power (W)
 - PUE = data center overhead factor
 - CI = carbon intensity (kgCO₂e/kWh)
