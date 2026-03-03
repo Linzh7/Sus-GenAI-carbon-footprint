@@ -10,10 +10,10 @@ This repository provides a simplified but scientifically grounded estimator for 
 
 The model is intentionally simple:
 
-[
+$$
 \text{CO₂e} =
 N \cdot T \cdot \rho \cdot \text{TDP} \cdot \text{PUE} \cdot \text{CI}
-]
+$$
 
 where:
 
