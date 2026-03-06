@@ -1,323 +1,126 @@
-# Lifecycle Carbon Footprint Estimator for GenAI Models
+# Local Machine Carbon Footprint and Comparative Grid-Carbon Analytics
 
-## Overview
+## Abstract
 
-This repository provides a simplified but scientifically grounded estimator for the lifecycle carbon footprint of GenAI workloads, including:
+This project implements a lightweight web-based decision-support tool for operational sustainability awareness. The system combines two complementary perspectives: (1) **device-level estimation** of electricity use and associated emissions for the host machine, and (2) **grid-level comparison** of carbon intensity and renewable-share indicators across user-selected countries/zones. The application is designed for transparency and pedagogical usability rather than high-precision life-cycle accounting.
 
-- Training emissions
-- Inference emissions
-- Optional embodied hardware emissions
+## Research Motivation
 
-The model is intentionally simple:
+Digital sustainability interventions often fail because users cannot directly connect personal device use with broader energy-system dynamics. This tool addresses that gap by integrating:
 
-$$
-\text{CO₂e} =
-N \cdot T \cdot \rho \cdot \text{TDP} \cdot \text{PUE} \cdot \text{CI}
-$$
+- local machine activity-derived estimates (uptime/sleep-informed), and
+- external electricity-system signals (zone-level carbon and renewable metrics).
 
-where:
+The intent is to support exploratory analysis, classroom demonstration, and early-stage sustainability reporting workflows.
 
-- (N) = number of GPUs
-- (T) = runtime (hours)
-- ($\rho$) = utilization factor
-- TDP = thermal design power (W)
-- PUE = data center overhead factor
-- CI = carbon intensity (kgCO₂e/kWh)
+## System Scope
 
-The goal is transparency, reproducibility, and easy implementation.
+The application exposes three routes:
 
-## Data Sources and Reliability Assessment
+- `/` — **Local machine estimator** (macOS-focused runtime signals + energy/emissions estimation)
+- `/world-stats` — **Multi-country comparison dashboard** (text input of comma-separated zone codes; bar-chart style visual comparison)
+- `/learn` — **Sustainability learning module** with SQLite-backed completion tracking
 
-This section classifies each parameter by scientific reliability.
+## Methodology
 
-### 1. GPU TDP (`tdp_watts`)
+### 1) Local machine energy and carbon estimation
 
-#### Source
+The system reads two host-level indicators:
 
-- Official NVIDIA product specification sheets
-- Vendor documentation (A100, H100, H200, etc.)
-- Manufacturer datasheets
+- `sysctl -n kern.boottime` (boot timestamp)
+- `pmset -g stats` (sleep count)
 
-#### Reliability
+Derived quantities:
 
-✔ High reliability as specification
-⚠ Not equal to actual runtime power
+- $uptime\_hours = t_{now} - t_{boot}$
+- $sleep\_hours_{est} = sleep\_count \times \frac{avg\_sleep\_minutes}{60}$
+- $awake\_hours_{est} = \max(0, uptime\_hours - sleep\_hours_{est})$
 
-TDP represents a maximum thermal envelope, not sustained draw.
+Energy and emissions model:
 
-Typical sustained draw:
+- $E_{kWh} = \frac{awake\_hours_{est} \cdot P_{active} + sleep\_hours_{est} \cdot P_{sleep}}{1000}$
+- $CO2e_{kg} = E_{kWh} \cdot \frac{CI_{gCO2e/kWh}}{1000}$
 
-- Training: 65–85% of TDP
-- Inference: 20–60% of TDP
+where $P_{active}$ and $P_{sleep}$ are user-defined power assumptions, and $CI$ is user-defined grid carbon intensity.
 
-Error risk: moderate if misinterpreted as actual power.
+### 2) Comparative world metrics
 
-### 2. Carbon Intensity (`CI`)
+For each zone code provided on `/world-stats` (e.g., `IN,DE,FR,US`), the app retrieves:
 
-#### Source
+- latest carbon intensity, and
+- latest renewable-energy percentage
 
-- Electricity Maps API (real-time and historical grid intensity)
-- National grid public APIs (e.g., UK Carbon Intensity API)
+from Electricity Maps API endpoints and renders comparative horizontal bars:
 
-#### Reliability
+- Carbon bar normalized to the highest carbon intensity among selected zones
+- Renewable bar represented on a 0–100% scale
 
-✔ High for reported average grid intensity
-⚠ Depends on:
+## Data Sources
 
-- Zone mapping accuracy
-- Time averaging
-- Whether using average vs marginal emissions
+- **Host telemetry (local):** macOS CLI utilities (`sysctl`, `pmset`)
+- **Grid metrics (external):** Electricity Maps API (`https://api.electricitymap.org`)
 
-Using time-averaged CI is acceptable for lifecycle accounting.
-Marginal CI is preferred for carbon-aware scheduling studies.
+## Assumptions and Limitations
 
-Error risk: low to moderate depending on time resolution.
+1. **Sleep duration is estimated**, not directly measured as cumulative duration in this implementation.
+2. Power draw inputs are user assumptions; no direct hardware wattmeter integration is performed.
+3. World metrics reflect API availability and token permissions.
+4. The Electricity Maps public website may block third-party iframe embedding; therefore the app provides a direct “open in new tab” link for the live map.
+5. This tool is suitable for educational and exploratory analysis, not audited emissions disclosure.
 
-### 3. PUE (Power Usage Effectiveness)
+## Configuration
 
-#### Source
+Environment variables are loaded from a local `.env` file (if present).
 
-- Industry averages
-- Cloud provider disclosures
-- Academic infrastructure reports
+Add your token in `.env`:
 
-#### Reliability
-
-⚠ Moderate reliability
-Varies significantly by:
-
-- Cloud provider
-- Season
-- Facility design
-
-Typical values:
-
-- Hyperscale: 1.1–1.2
-- Enterprise DC: 1.3–1.6
-
-If unknown, default 1.2 introduces potential ±15% error.
-
-### 4. Utilization Factor (`rho`)
-
-#### Source
-
-- Empirical measurements (NVML logs, academic energy papers)
-- Engineering assumptions
-
-#### Reliability
-
-⚠ Low to moderate
-Highly workload dependent:
-
-- Compute-bound training: 0.7–0.85
-- Memory-bound: 0.5–0.7
-- Inference batch=1: 0.2–0.5
-
-This is one of the largest uncertainty drivers.
-
-Recommendation:
-
-- Allow user override
-- Provide uncertainty range
-
-### 5. Embodied Emissions (`embodied_kgco2e`)
-
-#### Source
-
-- NVIDIA Product Carbon Footprint (PCF) summaries (HGX systems)
-- Academic lifecycle assessment studies
-- Server-level LCA allocation models
-
-#### Reliability
-
-⚠ Low to moderate
-Embodied carbon per GPU is typically:
-
-- Derived from server-level data
-- Allocated proportionally
-- Rarely directly measured per unit
-
-Uncertainty range: ±30–50%.
-
-Highly sensitive to assumed hardware lifetime.
-
-### 6. Lifetime Assumption (`expected_lifetime_hours`)
-
-#### Source
-
-- Depreciation policy
-- Industry cluster turnover patterns
-
-#### Reliability
-
-⚠ Low
-Varies widely:
-
-- Hyperscale training clusters: ~3 years
-- Inference clusters: 3–5 years
-- Research clusters: variable
-
-Embodied allocation scales inversely with lifetime.
-
-Major uncertainty contributor.
-
-## Accuracy Ranking (Most to Least Reliable)
-
-1. Carbon intensity (if time-resolved)
-2. TDP specification
-3. PUE
-4. Utilization factor (ρ)
-5. Embodied emissions
-6. Lifetime assumption
-
-## Workflow
-
-### High-Level Flow
-
-```
-User Input
-   |
-   v
-Validate GPU Model  -----> Lookup GPU TDP
-   |
-   v
-Resolve Location  -----> Map to Electricity Maps Zone
-   |
-   v
-Fetch Carbon Intensity (CI)
-   |
-   v
-Lookup PUE + Defaults
-   |
-   v
-Compute Energy:
-    E = N * T * rho * TDP * PUE
-   |
-   v
-Compute Emissions:
-    CO2e = E * CI
-   |
-   v
-(Optional)
-Compute Embodied Allocation
-   |
-   v
-Return:
-  - Training emissions
-  - Inference emissions
-  - Embodied emissions
-  - Total
+```bash
+ELECTRICITYMAPS_API_TOKEN="your_token_here"
 ```
 
-### Detailed Computation Flow
+Equivalent shell override:
 
-```
-                +------------------+
-                |   User Inputs    |
-                |------------------|
-                | GPU model        |
-                | ## GPUs           |
-                | Training hours   |
-                | Inference hours  |
-                | Location         |
-                +--------+---------+
-                         |
-                         v
-         +-------------------------------+
-         | Lookup GPU Database           |
-         | - TDP                         |
-         | - Embodied (optional)         |
-         +---------------+---------------+
-                         |
-                         v
-         +-------------------------------+
-         | Fetch Carbon Intensity (CI)   |
-         | from Electricity Maps API     |
-         +---------------+---------------+
-                         |
-                         v
-         +-------------------------------+
-         | Determine Parameters          |
-         | - rho                         |
-         | - PUE                         |
-         +---------------+---------------+
-                         |
-                         v
-         +-------------------------------+
-         | Energy Calculation            |
-         | E = N * T * rho * TDP * PUE   |
-         +---------------+---------------+
-                         |
-                         v
-         +-------------------------------+
-         | CO2 Calculation               |
-         | CO2e = E * CI                 |
-         +---------------+---------------+
-                         |
-                         v
-         +-------------------------------+
-         | Add Embodied (if enabled)     |
-         +---------------+---------------+
-                         |
-                         v
-                +------------------+
-                |    Final Output  |
-                +------------------+
+```bash
+export ELECTRICITYMAPS_API_TOKEN="your_token_here"
 ```
 
-## Assumptions
+## Reproducible Run Procedure
 
-This estimator assumes:
+### 1) Create and activate virtual environment
 
-- Linear scaling of energy with GPU-hours
-- No modeling of communication network overhead
-- No CPU power modeling (minor relative to GPU-heavy training)
-- No dynamic workload power variation
-- No time-shifting optimization
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
-This is a simplified operational LCA model.
+### 2) Install dependencies
 
-## Known Limitations
+```bash
+pip install -r requirements.txt
+```
 
-- Does not model:
-  - NVLink / InfiniBand energy
-  - CPU and memory energy
-  - Idle provisioning
-  - Power capping
-  - Thermal throttling
+### 3) Configure optional API token
 
-- Training time must be supplied or externally estimated.
+```bash
+cp .env .env.local 2>/dev/null || true
+# then set ELECTRICITYMAPS_API_TOKEN in .env
+```
 
-- Architecture performance differences are reflected through runtime, not artificial efficiency multipliers.
+### 4) Run the application
 
-## Recommended Use
+```bash
+python web_app.py
+```
 
-Appropriate for:
+### 5) Open in browser
 
-- Early-stage project footprint estimation
-- Scenario comparison (A100 vs H100)
-- Region comparison (DE vs FI)
-- Training vs inference tradeoff analysis
-- Research proposals and carbon reporting
+- `http://127.0.0.1:5000/` (local estimator)
+- `http://127.0.0.1:5000/world-stats` (country comparison)
+- `http://127.0.0.1:5000/learn` (learning page)
 
-Not appropriate for:
+## Project Structure (Key Files)
 
-- Precise infrastructure carbon accounting
-- Facility-level sustainability audits
-- Legal reporting
-
-## Suggested Extensions
-
-- Add Monte Carlo uncertainty propagation
-- Add TFLOPs-per-watt modeling
-- Add telemetry-based rho calibration
-- Add cloud instance mapping (AWS, GCP, Azure)
-- Add time-resolved CI integration instead of average
-
-## Transparency Statement
-
-All numerical assumptions are documented.
-Fields derived from manufacturer specifications are labeled as such.
-Fields based on heuristic or allocation assumptions are explicitly identified as uncertain.
-
-This estimator prioritizes transparency over hidden complexity.
+- `web_app.py` — Flask application, estimation logic, API integration, visualization templates
+- `.env` — local secrets/configuration (not committed)
+- `learning.db` — SQLite store for learning progress
+- `requirements.txt` — runtime Python dependencies
