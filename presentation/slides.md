@@ -2,10 +2,10 @@
 marp: true
 theme: default
 paginate: true
-title: Lifecycle Carbon Footprint Estimator
+title: Local Machine Carbon Footprint and Grid-Carbon Comparison
 style: |
   section {
-    background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 40%, #fef3c7 100%);
+    background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 45%, #fef3c7 100%);
     color: #1f2937;
     font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   }
@@ -15,7 +15,7 @@ style: |
   }
   strong { color: #b45309; }
   code {
-    background: #1f2937;
+    background: #111827;
     color: #ffffff;
     border-radius: 4px;
     padding: 1px 6px;
@@ -28,331 +28,215 @@ style: |
   }
 ---
 
-# Lifecycle Carbon Footprint Estimator
+# Local Machine Carbon Footprint and Grid-Carbon Comparison
 
-Simple baseline, practical realism, transparent uncertainty
+An interactive sustainability analytics prototype
 
 ---
 
 ## Agenda
 
-1. Why this project exists
-2. Model philosophy and scope
-3. System architecture and implementation
-4. Key capabilities and scenarios
-5. Limitations, validation, and roadmap
+1. Problem statement and objective
+2. System design and architecture
+3. Methodology and formulas
+4. Application walkthrough
+5. Limitations, validity, and next steps
 
 ---
 
-## 1) Problem Context
+## 1) Problem Statement
 
-- AI teams must estimate carbon and cost **before** full telemetry is available.
-- Existing options are often:
-  - too simple (single guess, no assumptions)
-  - too heavy (simulation complexity, low usability)
-- Training and inference differ strongly in behavior and metrics.
-
----
-
-## Why Existing Estimation Fails in Practice
-
-- Treating all workloads as uniform GPU utilization.
-- Ignoring regional and temporal grid carbon variation.
-- No bridge from infra metrics to product metrics (tokens/requests).
-- Single-value outputs without confidence or uncertainty ranges.
+- Most users do not see the climate impact of their everyday computing.
+- Existing tools are often either:
+  - too technical for regular users, or
+  - too simplified to support informed comparisons.
+- We need one tool that connects:
+  - **local device usage**, and
+  - **country-level electricity carbon context**.
 
 ---
 
-## 2) Design Principle
+## Project Objective
 
-**Keep the core estimator simple.**
-Add realism through optional, structured controls.
+Build a web application that can:
 
-- Default mode: fast, defensible baseline.
-- Advanced mode: calibration and deeper assumptions.
-- No hidden heuristics; assumptions are explicit in config and output.
+- estimate local machine energy use and emissions,
+- compare several countries by current grid-carbon signals,
+- provide a sustainability learning page for awareness.
 
----
+Design priorities:
 
-## Core Equation (Preserved)
-
-$$
-E = N \cdot T \cdot \rho \cdot TDP \cdot PUE
-$$
-
-$$
-CO2e = E \cdot CI
-$$
-
-Where:
-
-- `N`: GPU count
-- `T`: runtime
-- `rho`: utilization factor
-- `CI`: carbon intensity
+- transparency,
+- usability,
+- practical educational value.
 
 ---
 
-## What We Added Without Replacing the Core
+## 2) System Scope
 
-- Workload profiles for training and inference modes.
-- Two inference pathways:
-  - GPU-hours
-  - Request-based (token-driven)
-- Time-resolved CI providers.
-- Uncertainty bands + optional Monte Carlo summary.
+### Route-level features
+
+- `/` → Local machine carbon estimator
+- `/world-stats` → Multi-country grid comparison with visual bars
+- `/learn` → Sustainability learning modules with completion tracking
 
 ---
 
-## 3) Architecture Overview
+## Architecture Overview
 
 ```text
-main.py
-  -> cli.py             (interactive input flow)
-  -> carbon_clients.py  (CI providers)
-  -> estimator.py       (energy, CO2e, cost, uncertainty)
-  -> models.py          (typed dataclasses)
-  -> data.json          (profiles, defaults, mappings)
+web_app.py
+  -> Local machine signal extraction (macOS)
+  -> Carbon/energy estimation logic
+  -> Electricity Maps API integration
+  -> World comparison visualization
+  -> Learning module routes
+
+learning.db
+  -> lesson metadata
+  -> completion tracking
+
+.env
+  -> API token configuration
 ```
 
 ---
 
-## Data-Driven Configuration Strategy
+## Technology Stack
 
-`data.json` centralizes:
-
-- defaults (`rho`, PUE, carbon price)
-- training/inference profiles
-- uncertainty parameters
-- cloud instance mapping
-- GPU catalog (TDP, embodied, pricing)
-
-Result: model behavior is editable without changing code paths.
+- **Backend:** Python + Flask
+- **Storage:** SQLite (`learning.db`)
+- **External data:** Electricity Maps API
+- **Frontend:** Server-rendered HTML/CSS templates
+- **Runtime:** macOS CLI signals (`sysctl`, `pmset`) for local estimator
 
 ---
 
-## User Input Flow (CLI)
+## 3) Methodology: Local Estimation
 
-1. Select GPU model or cloud instance mapping.
-2. Select region, CI source, and CI mode.
-3. Select workload profiles.
-4. Choose inference mode (GPU-hours or request-based).
-5. Optional: telemetry calibration + advanced power model + Monte Carlo.
+Local signals used:
 
----
+- boot timestamp from `sysctl -n kern.boottime`
+- sleep count from `pmset -g stats`
 
-## CI Integration: Electricity and Time
-
-Supported providers:
-
-- **Electricity Maps**: latest + historical window average
-- **UK National Grid API**: latest + historical interval average
-
-CI mode can be:
-
-- `latest` (single value)
-- `time_resolved` (window average per phase)
-
----
-
-## Workload Profiles (Training)
-
-Included training profiles:
-
-- `pretraining_dense`
-- `finetune_sft`
-- `rlhf_ppo`
-- `hyperparam_sweep`
-
-Each can tune:
-
-- `rho`
-- `idle_fraction`
-- network/CPU overhead defaults
-
----
-
-## Workload Profiles (Inference)
-
-Included inference profiles:
-
-- `online_low_batch`
-- `offline_batch`
-- `rag_serving`
-- `cached_chat`
-
-Each can include request defaults:
-
-- `kwh_per_1k_tokens`
-- linear token coefficients `a`, `b`
-- quantization/batch/streaming factors
-
----
-
-## Inference Modeling: Two Practical Modes
-
-### A) GPU-hours mode
-
-- best when infra runtime is measured
-
-### B) Request-based mode
-
-- best when product metrics are available
+Derived time model:
 
 $$
-E_{infer} \approx \frac{tokens}{1000}\cdot kWh_{1k}\cdot PUE
+uptime\_hours = t_{now} - t_{boot}
 $$
 
 $$
-E_{req} = a\cdot L_{in} + b\cdot L_{out}
+sleep\_hours_{est} = sleep\_count \times \frac{avg\_sleep\_minutes}{60}
+$$
+
+$$
+awake\_hours_{est} = \max(0, uptime\_hours - sleep\_hours_{est})
 $$
 
 ---
 
-## Extended Operational Knobs (Optional)
+## Energy and Carbon Formulation
 
-To keep realism practical, we add bounded factors:
+$$
+E_{kWh} = \frac{awake\_hours_{est}\cdot P_{active} + sleep\_hours_{est}\cdot P_{sleep}}{1000}
+$$
 
-- idle provisioning
-- NVLink/InfiniBand overhead
-- CPU and memory overhead
-- power cap factor
-- thermal throttle factor
-- network overhead percentage
+$$
+CO2e_{kg} = E_{kWh} \cdot \frac{CI_{gCO2e/kWh}}{1000}
+$$
 
-These modify energy while preserving transparent math.
+Where:
 
----
-
-## Telemetry-Based Calibration
-
-`rho` source precedence:
-
-1. user override
-2. telemetry-derived estimate
-3. profile/default
-
-Telemetry input:
-
-- CSV or JSON
-- fields: `phase`, `gpu_power_watts`, optional `tdp_watts`
+- $P_{active}$ = assumed active power draw (W)
+- $P_{sleep}$ = assumed sleep power draw (W)
+- $CI$ = grid carbon intensity assumption
 
 ---
 
-## Uncertainty Method
+## Methodology: World Comparison
 
-Two levels of uncertainty output:
+For each user-entered zone code (e.g., `IN,DE,FR,US`), the app queries:
 
-1. Deterministic low/high ranges from configured percentages.
-2. Optional Monte Carlo summary:
-   - mean
-   - p10
-   - p50
-   - p90
+- `GET /v3/carbon-intensity/latest`
+- `GET /v3/renewable-energy/latest`
 
-This improves scientific honesty for planning decisions.
+Visualization logic:
 
----
-
-## 4) Scenario A: Region Comparison
-
-Example question:
-
-- Same workload, same hardware, different grid region.
-
-What changes:
-
-- `CI` and electricity price by country.
-
-What stays fixed:
-
-- model, runtime, profile, power factors.
-
-Outcome:
-
-- separates operational efficiency from grid effect.
+- Carbon intensity bars normalized to the highest selected zone
+- Renewable share bars shown on a 0–100% scale
 
 ---
 
-## Scenario B: Inference Strategy Comparison
+## Why This Design Matters
 
-Compare the same product workload under:
-
-- GPU-hours inference mode
-- request-based token mode
-
-Purpose:
-
-- reveal sensitivity to batching, context, cache hit rate, and quantization.
-
-This is especially useful for product and infra alignment.
+- Connects personal behavior and system-level electricity context.
+- Enables cross-country comparisons with low interaction cost.
+- Works as a teaching and discussion aid in sustainability courses.
+- Keeps assumptions explicit and editable by the user.
 
 ---
 
-## Output Contract (Machine + Human Friendly)
+## 4) Application Walkthrough
 
-Top-level output sections:
+### Demo flow (recommended)
 
-- `meta`
-- `phases.training`
-- `phases.inference`
-- `phases.embodied`
-- `efficiency`
-- `uncertainty_ranges`
-- `monte_carlo`
-- `total`
+1. Open `/` and inspect machine uptime/sleep-derived estimate.
+2. Adjust power assumptions and observe estimate sensitivity.
+3. Open `/world-stats` and input multiple codes (e.g., `IN,DE,SE,FR`).
+4. Discuss differences using the bar chart.
+5. Open `/learn` and show progress tracking workflow.
 
 ---
 
-## How Teams Can Use the Output
+## Example Interpretation Slide
 
-- PM/Finance: total cost and scenario tradeoffs
-- Sustainability: carbon reporting with assumptions
-- Infra: profile calibration and efficiency tuning
-- Research: hardware/region strategy comparisons
+If Zone A has:
 
----
+- higher carbon-intensity bar,
+- lower renewable-share bar,
 
-## 5) Known Boundaries
+then the same electricity demand tends to imply higher marginal operational emissions.
 
-This is a planning estimator, not a facility audit tool.
+This supports practical decisions such as:
 
-Not modeled in detail:
-
-- full network topology power behavior
-- all CPU/memory dynamics by micro-architecture
-- legal-grade accounting workflows
+- timing flexible workloads,
+- selecting deployment regions,
+- communicating sustainability trade-offs.
 
 ---
 
-## Validation and Quality
+## 5) Limitations and Validity
 
-Implemented checks include:
-
-- schema-driven defaults in `data.json`
-- compile and smoke tests
-- structured, explicit output fields
-
-Planned quality upgrades:
-
-- fixture-based API client tests
-- benchmark harness for per-token calibration
+- Sleep duration is estimated from count × average duration.
+- Power draw is user-specified, not measured with hardware sensors.
+- API values are time-sensitive and token-permission dependent.
+- This is a planning and educational tool, not legal-grade carbon accounting.
 
 ---
 
-## Roadmap
+## Reliability and Reproducibility
 
-1. Add benchmark pipeline for `kwh_per_1k_tokens` estimation.
-2. Add non-interactive CLI flags for automation.
-3. Add report export templates (PDF/CSV/JSON profile).
-4. Add CI tests and packaging for repeatable releases.
+- Deterministic formulas for local estimation.
+- Explicit configuration in `.env` and user-input assumptions.
+- Reproducible startup through `venv` + `requirements.txt`.
+- Route-level smoke tests used during development.
 
 ---
 
-## Closing
+## Potential Extensions
 
-- We keep the estimator simple by default.
-- We provide realistic controls when needed.
-- We expose assumptions and uncertainty clearly.
+1. Real-time local power telemetry integration.
+2. Time-series storage and trend analytics.
+3. Downloadable report export (CSV/PDF).
+4. Wider platform support beyond macOS signal model.
+5. Confidence intervals via uncertainty sampling.
 
-**Result:** fast decisions with defensible transparency.
+---
+
+## Conclusion
+
+- The prototype delivers an interpretable bridge between **device-level use** and **grid-level carbon context**.
+- The interface supports both exploration and comparative reasoning.
+- The system is intentionally simple, transparent, and extensible.
+
+**Outcome:** practical sustainability insight with low setup overhead.
