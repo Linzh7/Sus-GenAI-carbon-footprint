@@ -32,211 +32,122 @@ style: |
 
 An interactive sustainability analytics prototype
 
----
-
-## Agenda
-
-1. Problem statement and objective
-2. System design and architecture
-3. Methodology and formulas
-4. Application walkthrough
-5. Limitations, validity, and next steps
+**Agenda:** Problem & Objective → Architecture → Methodology → Demo → Limitations & Next Steps
 
 ---
 
-## 1) Problem Statement
+## Problem Statement & Objective
 
-- Most users do not see the climate impact of their everyday computing.
-- Existing tools are often either:
-  - too technical for regular users, or
-  - too simplified to support informed comparisons.
-- We need one tool that connects:
-  - **local device usage**, and
-  - **country-level electricity carbon context**.
+**Problem:** Most users don't see the climate impact of everyday computing. Existing tools are either too technical or too simplified.
 
----
+**Objective:** Build a web application that can:
 
-## Project Objective
+- Estimate **local machine** energy use and CO₂ emissions
+- Compare countries by **real-time grid-carbon** signals (Electricity Maps API)
+- Provide a **sustainability learning** page with completion tracking
 
-Build a web application that can:
-
-- estimate local machine energy use and emissions,
-- compare several countries by current grid-carbon signals,
-- provide a sustainability learning page for awareness.
-
-Design priorities:
-
-- transparency,
-- usability,
-- practical educational value.
+| Route          | Feature                                        |
+| -------------- | ---------------------------------------------- |
+| `/`            | Local machine carbon estimator                 |
+| `/world-stats` | Multi-country grid comparison with visual bars |
+| `/learn`       | Sustainability learning modules                |
 
 ---
 
-## 2) System Scope
-
-### Route-level features
-
-- `/` → Local machine carbon estimator
-- `/world-stats` → Multi-country grid comparison with visual bars
-- `/learn` → Sustainability learning modules with completion tracking
-
----
-
-## Architecture Overview
+## System Design & Technology Stack
 
 ```text
 web_app.py
-  -> Local machine signal extraction (macOS)
-  -> Carbon/energy estimation logic
-  -> Electricity Maps API integration
-  -> World comparison visualization
-  -> Learning module routes
-
-learning.db
-  -> lesson metadata
-  -> completion tracking
-
-.env
-  -> API token configuration
+  → Local signal extraction (macOS: sysctl, pmset)
+  → Carbon/energy estimation logic
+  → Electricity Maps API integration
+  → World comparison visualization
+  → Learning module routes
 ```
 
----
-
-## Technology Stack
-
-- **Backend:** Python + Flask
-- **Storage:** SQLite (`learning.db`)
-- **External data:** Electricity Maps API
-- **Frontend:** Server-rendered HTML/CSS templates
-- **Runtime:** macOS CLI signals (`sysctl`, `pmset`) for local estimator
+| Layer             | Technology                    |
+| ----------------- | ----------------------------- |
+| **Backend**       | Python + Flask                |
+| **Storage**       | SQLite (`learning.db`)        |
+| **External data** | Electricity Maps API          |
+| **Frontend**      | Server-rendered HTML/CSS      |
+| **Local signals** | macOS CLI (`sysctl`, `pmset`) |
 
 ---
 
-## 3) Methodology: Local Estimation
+## Methodology: Local Estimation
 
-Local signals used:
+**Inputs:** boot timestamp (`sysctl`), sleep count (`pmset`)
 
-- boot timestamp from `sysctl -n kern.boottime`
-- sleep count from `pmset -g stats`
-
-Derived time model:
+**Time model:**
 
 $$
-uptime\_hours = t_{now} - t_{boot}
+awake\_hours = \max\!\Big(0,\;(t_{now} - t_{boot}) - sleep\_count \times \tfrac{avg\_sleep\_min}{60}\Big)
 $$
 
-$$
-sleep\_hours_{est} = sleep\_count \times \frac{avg\_sleep\_minutes}{60}
-$$
+**Energy & carbon:**
 
 $$
-awake\_hours_{est} = \max(0, uptime\_hours - sleep\_hours_{est})
+E_{kWh} = \frac{awake \cdot P_{active} + sleep \cdot P_{sleep}}{1000}
+\qquad
+CO2e_{kg} = E_{kWh} \cdot \frac{CI_{gCO2/kWh}}{1000}
 $$
 
----
-
-## Energy and Carbon Formulation
-
-$$
-E_{kWh} = \frac{awake\_hours_{est}\cdot P_{active} + sleep\_hours_{est}\cdot P_{sleep}}{1000}
-$$
-
-$$
-CO2e_{kg} = E_{kWh} \cdot \frac{CI_{gCO2e/kWh}}{1000}
-$$
-
-Where:
-
-- $P_{active}$ = assumed active power draw (W)
-- $P_{sleep}$ = assumed sleep power draw (W)
-- $CI$ = grid carbon intensity assumption
+- $P_{active}$, $P_{sleep}$ = user-specified power draw (W)
+- $CI$ = grid carbon intensity (gCO₂/kWh)
 
 ---
 
 ## Methodology: World Comparison
 
-For each user-entered zone code (e.g., `IN,DE,FR,US`), the app queries:
+For each zone code (e.g., `IN,DE,FR,US`), the app queries:
 
 - `GET /v3/carbon-intensity/latest`
 - `GET /v3/renewable-energy/latest`
 
-Visualization logic:
+**Visualization:** carbon intensity bars normalized to the highest zone; renewable share on 0–100% scale.
 
-- Carbon intensity bars normalized to the highest selected zone
-- Renewable share bars shown on a 0–100% scale
+**Why this matters:**
 
----
-
-## Why This Design Matters
-
-- Connects personal behavior and system-level electricity context.
-- Enables cross-country comparisons with low interaction cost.
-- Works as a teaching and discussion aid in sustainability courses.
-- Keeps assumptions explicit and editable by the user.
+- Connects **personal device behavior** with **system-level electricity context**
+- Enables cross-country comparison with minimal interaction cost
+- Supports decisions like timing flexible workloads or selecting deployment regions
 
 ---
 
-## 4) Application Walkthrough
+## Application Walkthrough
 
-### Demo flow (recommended)
+### Recommended demo flow
 
-1. Open `/` and inspect machine uptime/sleep-derived estimate.
-2. Adjust power assumptions and observe estimate sensitivity.
-3. Open `/world-stats` and input multiple codes (e.g., `IN,DE,SE,FR`).
-4. Discuss differences using the bar chart.
-5. Open `/learn` and show progress tracking workflow.
-
----
-
-## Example Interpretation Slide
-
-If Zone A has:
-
-- higher carbon-intensity bar,
-- lower renewable-share bar,
-
-then the same electricity demand tends to imply higher marginal operational emissions.
-
-This supports practical decisions such as:
-
-- timing flexible workloads,
-- selecting deployment regions,
-- communicating sustainability trade-offs.
+1. Open `/` — inspect machine uptime/sleep-derived estimate
+2. Adjust power assumptions — observe estimate sensitivity
+3. Open `/world-stats` — input zone codes (e.g., `IN,DE,SE,FR`)
+4. Compare bars — higher carbon intensity + lower renewables → higher marginal emissions
+5. Open `/learn` — show progress tracking workflow
 
 ---
 
-## 5) Limitations and Validity
+## Interpreting results
 
-- Sleep duration is estimated from count × average duration.
-- Power draw is user-specified, not measured with hardware sensors.
-- API values are time-sensitive and token-permission dependent.
-- This is a planning and educational tool, not legal-grade carbon accounting.
-
----
-
-## Reliability and Reproducibility
-
-- Deterministic formulas for local estimation.
-- Explicit configuration in `.env` and user-input assumptions.
-- Reproducible startup through `venv` + `requirements.txt`.
-- Route-level smoke tests used during development.
+| Zone pattern            | Implication                                |
+| ----------------------- | ------------------------------------------ |
+| High CI, low renewables | Same demand → higher operational emissions |
+| Low CI, high renewables | Cleaner grid → lower marginal footprint    |
 
 ---
 
-## Potential Extensions
+## Limitations & Next Steps
 
-1. Real-time local power telemetry integration.
-2. Time-series storage and trend analytics.
-3. Downloadable report export (CSV/PDF).
-4. Wider platform support beyond macOS signal model.
-5. Confidence intervals via uncertainty sampling.
+**Limitations:**
 
----
+- Sleep duration estimated from count × average (not measured)
+- Power draw is user-specified, not hardware-metered
+- API values are time-sensitive and token-permission dependent
 
-## Conclusion
+**Potential extensions:**
 
-- The prototype delivers an interpretable bridge between **device-level use** and **grid-level carbon context**.
-- The interface supports both exploration and comparative reasoning.
-- The system is intentionally simple, transparent, and extensible.
+1. Real-time local power telemetry integration
+2. Time-series storage and trend analytics
+3. Confidence intervals via uncertainty sampling
 
-**Outcome:** practical sustainability insight with low setup overhead.
+**Conclusion:** The prototype bridges **device-level use** and **grid-level carbon context** with transparency, simplicity, and extensibility.
