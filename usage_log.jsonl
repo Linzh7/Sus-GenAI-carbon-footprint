@@ -1,0 +1,1 @@
+{"timestamp_utc": "2026-03-05T14:45:06Z", "phase": "training", "gpu_model": "NVIDIA A10 Tensor Core", "num_gpus": 1, "hours": 1.0, "country": "FI", "rho": 0.82, "ci_g_per_kwh": 300.0, "pue": 1.15, "metrics": {"energy_kwh": 0.3893583749999999, "co2e_kg": 0.11680751249999997, "total_cost_usd": 0.8788450709375}, "notes": ""}
