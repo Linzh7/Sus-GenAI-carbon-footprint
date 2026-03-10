@@ -14,9 +14,11 @@ from urllib.request import Request, urlopen
 from flask import Flask, abort, redirect, render_template_string, request, url_for
 
 LEARNING_DB_PATH = Path(__file__).with_name("learning.db")
+COORD_DB_PATH = Path(__file__).with_name("zone_coords.db")
 DOTENV_PATH = Path(__file__).with_name(".env")
 
 app = Flask(__name__)
+app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost", ".localhost"]
 
 
 def _load_dotenv(path: Path) -> None:
@@ -45,6 +47,26 @@ def _load_dotenv(path: Path) -> None:
 
 
 _load_dotenv(DOTENV_PATH)
+
+
+def _ensure_coord_db() -> None:
+  with sqlite3.connect(COORD_DB_PATH) as conn:
+    cur = conn.cursor()
+    cur.execute(
+      """
+      CREATE TABLE IF NOT EXISTS zone_coords (
+        zone TEXT PRIMARY KEY,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        source TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+      """
+    )
+    conn.commit()
+
+
+_ensure_coord_db()
 
 
 def _run_command(args: List[str]) -> str:
@@ -83,7 +105,10 @@ def _machine_metrics(avg_sleep_minutes: float) -> Dict[str, float | str]:
 
     uptime_hours = max(0.0, (now_ts - boot_ts) / 3600.0)
     sleep_count = _sleep_count()
-    est_sleep_hours = max(0.0, sleep_count * (max(avg_sleep_minutes, 0.0) / 60.0))
+    raw_sleep_hours = max(0.0, sleep_count * (max(avg_sleep_minutes, 0.0) / 60.0))
+    # Sleep count on macOS can include short transitions; cap the estimate
+    # so awake time does not collapse unrealistically.
+    est_sleep_hours = min(raw_sleep_hours, uptime_hours * 0.8)
     est_awake_hours = max(0.0, uptime_hours - est_sleep_hours)
 
     boot_local = datetime.fromtimestamp(boot_ts).strftime("%Y-%m-%d %H:%M:%S")
@@ -92,6 +117,7 @@ def _machine_metrics(avg_sleep_minutes: float) -> Dict[str, float | str]:
         "boot_local": boot_local,
         "uptime_hours": uptime_hours,
         "sleep_count": float(sleep_count),
+        "sleep_hours_raw": raw_sleep_hours,
         "sleep_hours_est": est_sleep_hours,
         "awake_hours_est": est_awake_hours,
     }
@@ -167,6 +193,145 @@ def _fetch_world_stats(zone: str, token: str) -> Dict[str, Any]:
         "renewable_pct": _extract_float(re_payload, ["renewablePercentage", "renewablePercentageAvg"]),
         "carbon_payload": ci_payload,
         "renewable_payload": re_payload,
+    }
+
+
+def _extract_lat_lon(payload: Dict[str, Any]) -> Tuple[float | None, float | None]:
+    direct_lat = payload.get("latitude") if isinstance(payload.get("latitude"), (int, float)) else None
+    direct_lon = payload.get("longitude") if isinstance(payload.get("longitude"), (int, float)) else None
+    if direct_lat is not None and direct_lon is not None:
+        return float(direct_lat), float(direct_lon)
+
+    for container_key in ["location", "center", "coordinates"]:
+        container = payload.get(container_key)
+        if isinstance(container, dict):
+            lat = container.get("lat") if isinstance(container.get("lat"), (int, float)) else container.get("latitude")
+            lon = container.get("lon") if isinstance(container.get("lon"), (int, float)) else container.get("longitude")
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                return float(lat), float(lon)
+
+    for pair_key in ["zoneCoordinates", "coordinates"]:
+        pair = payload.get(pair_key)
+        if isinstance(pair, list) and len(pair) >= 2 and all(isinstance(v, (int, float)) for v in pair[:2]):
+            # Most geojson-like pairs are [lon, lat]
+            return float(pair[1]), float(pair[0])
+
+    return None, None
+
+
+FALLBACK_ZONE_COORDS: Dict[str, Tuple[float, float]] = {
+    "IN": (20.5937, 78.9629),
+    "DE": (51.1657, 10.4515),
+    "FR": (46.2276, 2.2137),
+    "US": (39.8283, -98.5795),
+    "FI": (61.9241, 25.7482),
+    "SE": (60.1282, 18.6435),
+    "NO": (60.4720, 8.4689),
+    "GB": (55.3781, -3.4360),
+    "ES": (40.4637, -3.7492),
+    "IT": (41.8719, 12.5674),
+}
+
+
+def _coord_cache_get(zone: str) -> Tuple[float | None, float | None]:
+    with sqlite3.connect(COORD_DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT lat, lon FROM zone_coords WHERE zone = ?", (zone,))
+        row = cur.fetchone()
+    if not row:
+        return None, None
+    return float(row[0]), float(row[1])
+
+
+def _coord_cache_upsert(zone: str, lat: float, lon: float, source: str) -> None:
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    with sqlite3.connect(COORD_DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO zone_coords (zone, lat, lon, source, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(zone) DO UPDATE SET
+                lat = excluded.lat,
+                lon = excluded.lon,
+                source = excluded.source,
+                updated_at = excluded.updated_at
+            """,
+            (zone, float(lat), float(lon), source, now),
+        )
+        conn.commit()
+
+
+def _nominatim_lookup(zone: str) -> Tuple[float | None, float | None]:
+    zone_prefix = zone.split("-", 1)[0].lower()
+    params: Dict[str, str] = {"format": "json", "limit": "1"}
+    if len(zone_prefix) == 2 and zone_prefix.isalpha():
+        params["countrycodes"] = zone_prefix
+    else:
+        params["q"] = zone
+
+    query = urlencode(params)
+    req = Request(
+        f"https://nominatim.openstreetmap.org/search?{query}",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "sus-pro-carbon-app/1.0 (educational-project)",
+        },
+    )
+    try:
+        with urlopen(req, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if isinstance(payload, list) and payload:
+            head = payload[0]
+            lat_raw = head.get("lat")
+            lon_raw = head.get("lon")
+            if lat_raw is not None and lon_raw is not None:
+                return float(lat_raw), float(lon_raw)
+    except Exception:
+        return None, None
+
+    return None, None
+
+
+def _resolve_zone_coordinates(zone: str, token: str) -> Tuple[float | None, float | None]:
+    cached_lat, cached_lon = _coord_cache_get(zone)
+    if cached_lat is not None and cached_lon is not None:
+        return cached_lat, cached_lon
+
+    try:
+        zone_payload = _em_api_get("/v3/zone", {"zone": zone}, token)
+        lat, lon = _extract_lat_lon(zone_payload)
+        if lat is not None and lon is not None:
+            _coord_cache_upsert(zone, lat, lon, "electricitymaps-zone")
+            return lat, lon
+    except Exception:
+        pass
+
+    fallback = FALLBACK_ZONE_COORDS.get(zone)
+    if fallback is not None:
+        _coord_cache_upsert(zone, fallback[0], fallback[1], "fallback-country-center")
+        return fallback
+
+    lat, lon = _nominatim_lookup(zone)
+    if lat is not None and lon is not None:
+        _coord_cache_upsert(zone, lat, lon, "nominatim")
+        return lat, lon
+
+    return None, None
+
+
+def _fetch_zone_map_point(zone: str, token: str) -> Dict[str, Any] | None:
+    stats = _fetch_world_stats(zone=zone, token=token)
+    lat, lon = _resolve_zone_coordinates(zone=zone, token=token)
+    if lat is None or lon is None:
+        return None
+
+    return {
+        "zone": zone,
+        "lat": lat,
+        "lon": lon,
+        "carbon_intensity": stats.get("carbon_intensity"),
+        "renewable_pct": stats.get("renewable_pct"),
     }
 
 
@@ -363,7 +528,7 @@ def index() -> str:
     active_watts = _safe_float(request.form.get("active_watts"), 35.0)
     sleep_watts = _safe_float(request.form.get("sleep_watts"), 2.5)
     ci_g_per_kwh = _safe_float(request.form.get("ci_g_per_kwh"), 475.0)
-    avg_sleep_minutes = _safe_float(request.form.get("avg_sleep_minutes"), 45.0)
+    avg_sleep_minutes = _safe_float(request.form.get("avg_sleep_minutes"), 12.0)
 
     machine = _machine_metrics(avg_sleep_minutes=avg_sleep_minutes)
     footprint = _compute_footprint(
@@ -392,6 +557,7 @@ def world_stats() -> str:
 
     stats = None
     chart_rows: List[Dict[str, Any]] = []
+    has_renewable_data = False
     error = ""
 
     if token and zones:
@@ -415,6 +581,8 @@ def world_stats() -> str:
                 re = row.get("renewable_pct")
                 row["ci_bar_pct"] = 0.0 if ci is None or max_ci <= 0 else max(0.0, min(100.0, float(ci) / max_ci * 100.0))
                 row["re_bar_pct"] = 0.0 if re is None else max(0.0, min(100.0, float(re)))
+                if re is not None:
+                    has_renewable_data = True
 
         if zone_errors:
             error = "Some zones failed: " + " | ".join(zone_errors)
@@ -426,6 +594,7 @@ def world_stats() -> str:
         zone=zones[0] if zones else "",
         zones_input=zones_input,
         chart_rows=chart_rows,
+        has_renewable_data=has_renewable_data,
         has_token=bool(token),
         stats=stats,
         error=error,
@@ -437,6 +606,41 @@ def learn_dashboard() -> str:
     lessons = _fetch_lessons_with_progress()
     stats = _fetch_learning_stats()
     return render_template_string(LEARN_INDEX_TEMPLATE, lessons=lessons, stats=stats)
+
+
+@app.route("/map", methods=["GET", "POST"])
+def map_view() -> str:
+    token = os.getenv("ELECTRICITYMAPS_API_TOKEN", "").strip()
+    zones_input = (request.form.get("zones") or request.args.get("zones") or "IN,DE,FR,US").strip()
+    zones = _parse_zones(zones_input)
+
+    points: List[Dict[str, Any]] = []
+    error = ""
+
+    if token and zones:
+        zone_errors: List[str] = []
+        for zone in zones:
+            try:
+                point = _fetch_zone_map_point(zone=zone, token=token)
+                if point is None:
+                    zone_errors.append(f"{zone}: no coordinate data")
+                    continue
+                points.append(point)
+            except Exception as exc:
+                zone_errors.append(f"{zone}: {exc}")
+
+        if zone_errors:
+            error = "Some zones failed: " + " | ".join(zone_errors)
+    elif token and not zones:
+        error = "Please provide at least one country/zone code."
+
+    return render_template_string(
+        MAP_TEMPLATE,
+        has_token=bool(token),
+        zones_input=zones_input,
+        points=points,
+        error=error,
+    )
 
 
 @app.route("/learn/<int:lesson_id>", methods=["GET"])
@@ -485,11 +689,13 @@ MACHINE_TEMPLATE = """
       <div class="nav">
         <a href="{{ url_for('index') }}">Machine tracker</a>
         <a href="{{ url_for('world_stats') }}">World stats</a>
+        <a href="{{ url_for('map_view') }}">Map</a>
         <a href="{{ url_for('learn_dashboard') }}">Learn</a>
       </div>
 
       <h1>Local machine carbon footprint</h1>
       <p class="muted">This page reads uptime and sleep count from your macOS machine and estimates energy/emissions.</p>
+      <p class="muted">Default power values are heuristic laptop assumptions (active ~20–60W, sleep ~1–5W). You should replace them with your own device-specific assumptions if known.</p>
 
       <div class="grid">
         <section class="card">
@@ -497,9 +703,10 @@ MACHINE_TEMPLATE = """
           <p>Boot time: <strong>{{ machine.boot_local }}</strong></p>
           <p>Uptime since boot: <span class="metric">{{ '%.2f'|format(machine.uptime_hours) }} h</span></p>
           <p>Sleep/wake count since boot: <span class="metric">{{ '%.0f'|format(machine.sleep_count) }}</span></p>
-          <p>Estimated sleep time: <strong>{{ '%.2f'|format(machine.sleep_hours_est) }} h</strong></p>
+          <p>Raw sleep estimate (count × avg): <strong>{{ '%.2f'|format(machine.sleep_hours_raw) }} h</strong></p>
+          <p>Adjusted sleep estimate: <strong>{{ '%.2f'|format(machine.sleep_hours_est) }} h</strong></p>
           <p>Estimated awake time: <strong>{{ '%.2f'|format(machine.awake_hours_est) }} h</strong></p>
-          <p class="muted">Sleep duration is estimated using sleep count × average sleep minutes per cycle.</p>
+          <p class="muted">Sleep duration is estimated using sleep count × average sleep minutes per cycle, then bounded to avoid unrealistic overestimation.</p>
         </section>
 
         <section class="card">
@@ -583,16 +790,17 @@ WORLD_TEMPLATE = """
       <div class="nav">
         <a href="{{ url_for('index') }}">Machine tracker</a>
         <a href="{{ url_for('world_stats') }}">World stats</a>
+        <a href="{{ url_for('map_view') }}">Map</a>
         <a href="{{ url_for('learn_dashboard') }}">Learn</a>
       </div>
 
       <h1>World carbon map and zone stats</h1>
 
       <section class="card">
-        <h2>Live map (Electricity Maps)</h2>
-        <p class="muted">The Electricity Maps website blocks third-party iframe embedding. Open it directly below:</p>
-        <a class="map-link" href="https://app.electricitymaps.com/map/live/fifteen_minutes" target="_blank" rel="noopener">
-          Open live map in new tab
+        <h2>Interactive map</h2>
+        <p class="muted">Open the in-app map page to view selected zones geographically.</p>
+        <a class="map-link" href="{{ url_for('map_view') }}">
+          Open map page
         </a>
       </section>
 
@@ -629,13 +837,18 @@ WORLD_TEMPLATE = """
                 </div>
                 <div class="value">{{ '%.1f'|format(row.carbon_intensity) if row.carbon_intensity is not none else 'N/A' }} gCO₂e/kWh</div>
 
+                {% if has_renewable_data %}
                 <div class="metric-label" style="margin-top:8px;">Renewable share</div>
                 <div class="track">
                   <div class="bar-re" style="width: {{ '%.1f'|format(row.re_bar_pct) }}%;"></div>
                 </div>
                 <div class="value">{{ '%.1f'|format(row.renewable_pct) if row.renewable_pct is not none else 'N/A' }}%</div>
+                {% endif %}
               </div>
             {% endfor %}
+            {% if not has_renewable_data %}
+              <p class="muted">Renewable share is unavailable for the selected zones/token permissions, so the comparison currently shows carbon intensity only.</p>
+            {% endif %}
           </div>
         {% endif %}
       </section>
@@ -667,6 +880,7 @@ LEARN_INDEX_TEMPLATE = """
       <div class="nav">
         <a href="{{ url_for('index') }}">Machine tracker</a>
         <a href="{{ url_for('world_stats') }}">World stats</a>
+        <a href="{{ url_for('map_view') }}">Map</a>
         <a href="{{ url_for('learn_dashboard') }}">Learn</a>
       </div>
 
@@ -676,7 +890,7 @@ LEARN_INDEX_TEMPLATE = """
       {% for lesson in lessons %}
       <section class="card">
         <a class="lesson" href="{{ url_for('learn_lesson', lesson_id=lesson.id) }}">{{ lesson.title }}</a>
-        <p class="muted">{{ lesson.category }} • {{ lesson.duration_minutes }} min • +{{ lesson.points }} pts {% if lesson.is_completed %}• Completed{% endif %}</p>
+        <p class="muted">{{ lesson.category }} • planned study time: {{ lesson.duration_minutes }} min • +{{ lesson.points }} pts {% if lesson.is_completed %}• Completed{% endif %}</p>
         <p>{{ lesson.description }}</p>
       </section>
       {% endfor %}
@@ -709,11 +923,12 @@ LEARN_DETAIL_TEMPLATE = """
       <div class="nav">
         <a href="{{ url_for('index') }}">Machine tracker</a>
         <a href="{{ url_for('world_stats') }}">World stats</a>
+        <a href="{{ url_for('map_view') }}">Map</a>
         <a href="{{ url_for('learn_dashboard') }}">Learn</a>
       </div>
 
       <h1>{{ lesson.title }}</h1>
-      <p class="muted">{{ lesson.category }} • {{ lesson.duration_minutes }} min • +{{ lesson.points }} pts</p>
+      <p class="muted">{{ lesson.category }} • planned study time: {{ lesson.duration_minutes }} min • +{{ lesson.points }} pts</p>
 
       <section class="card">
         <iframe src="https://www.youtube.com/embed/{{ lesson.youtube_id }}" allowfullscreen></iframe>
@@ -723,6 +938,113 @@ LEARN_DETAIL_TEMPLATE = """
         </form>
       </section>
     </div>
+  </body>
+</html>
+"""
+
+
+MAP_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>World Carbon Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      body { margin: 0; background: #0b1220; color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 40px; }
+      .nav { display: flex; gap: 10px; margin-bottom: 18px; }
+      .nav a { color: #93c5fd; text-decoration: none; }
+      .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+      form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      input { border: 1px solid #374151; border-radius: 8px; padding: 8px; background: #0f172a; color: #e5e7eb; min-width: 220px; }
+      button { border: none; border-radius: 8px; padding: 9px 12px; cursor: pointer; background: #22c55e; color: #052e16; font-weight: 700; }
+      .muted { color: #94a3b8; }
+      .warn { color: #fda4af; }
+      #map { width: 100%; height: 66vh; border-radius: 10px; border: 1px solid #253047; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="nav">
+        <a href="{{ url_for('index') }}">Machine tracker</a>
+        <a href="{{ url_for('world_stats') }}">World stats</a>
+        <a href="{{ url_for('map_view') }}">Map</a>
+        <a href="{{ url_for('learn_dashboard') }}">Learn</a>
+      </div>
+
+      <h1>Electricity Maps data on custom map</h1>
+
+      <section class="card">
+        <form method="post" action="{{ url_for('map_view') }}">
+          <label>
+            Country/zone codes (comma-separated)
+            <input type="text" name="zones" value="{{ zones_input }}" placeholder="IN, DE, FR, US" />
+          </label>
+          <button type="submit">Update map</button>
+        </form>
+        {% if not has_token %}
+          <p class="muted">Set <strong>ELECTRICITYMAPS_API_TOKEN</strong> in your `.env` file to load map points.</p>
+        {% endif %}
+        {% if error %}
+          <p class="warn">{{ error }}</p>
+        {% endif %}
+      </section>
+
+      <section class="card">
+        <div id="map"></div>
+      </section>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const points = {{ points | tojson }};
+
+      const map = L.map('map').setView([22, 10], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 8,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      function colorForCI(ci) {
+        if (ci == null) return '#94a3b8';
+        if (ci < 150) return '#22c55e';
+        if (ci < 300) return '#f59e0b';
+        return '#ef4444';
+      }
+
+      if (points.length > 0) {
+        const latLngs = [];
+        for (const p of points) {
+          const marker = L.circleMarker([p.lat, p.lon], {
+            radius: 8,
+            color: colorForCI(p.carbon_intensity),
+            fillColor: colorForCI(p.carbon_intensity),
+            fillOpacity: 0.75,
+            weight: 1
+          }).addTo(map);
+
+          marker.bindPopup(
+            `<strong>${p.zone}</strong><br>` +
+            `Carbon intensity: ${p.carbon_intensity == null ? 'N/A' : p.carbon_intensity.toFixed(1) + ' gCO₂e/kWh'}<br>` +
+            `Renewable share: ${p.renewable_pct == null ? 'N/A' : p.renewable_pct.toFixed(1) + '%'}`
+          );
+
+          latLngs.push([p.lat, p.lon]);
+        }
+        map.fitBounds(latLngs, { padding: [20, 20] });
+      }
+    </script>
   </body>
 </html>
 """
